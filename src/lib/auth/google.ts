@@ -20,8 +20,9 @@ export function getAuthUrl(): string {
   const client = createOAuth2Client();
   return client.generateAuthUrl({
     access_type: "offline",
-    prompt: "consent",
+    prompt: "select_account",
     scope: SCOPES,
+    include_granted_scopes: true,
   });
 }
 
@@ -35,7 +36,7 @@ export async function exchangeCode(code: string) {
 
   return {
     access_token: tokens.access_token!,
-    refresh_token: tokens.refresh_token!,
+    refresh_token: tokens.refresh_token || "",
     expires_at: tokens.expiry_date || Date.now() + 3600 * 1000,
     email: profile.email!,
     name: profile.name || profile.email!,
