@@ -25,6 +25,9 @@ export const metadata: Metadata = {
   title: "InCaseOf | Your Emergency Info, Sorted",
   description:
     "Fill in your emergency info once. Share it with the people who matter. Free, guided, and stored on your own Google Drive.",
+  verification: {
+    google: "kKTDEiUX7tJ4b6y2YBTpvG2mhaU7eUuXlapX_eKajVc",
+  },
 };
 
 export default function RootLayout({
