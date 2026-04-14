@@ -1,6 +1,10 @@
 "use client";
 
-const footerLinks = ["Privacy", "Terms", "Support"];
+const footerLinks = [
+  { label: "Privacy", href: "/privacy" },
+  { label: "Terms", href: "/privacy" },
+  { label: "Support", href: "mailto:hello@tryincaseof.com" },
+];
 
 export default function Footer() {
   return (
@@ -10,8 +14,8 @@ export default function Footer() {
       </span>
       <div className="footer__links">
         {footerLinks.map((link) => (
-          <a key={link} href="#" className="footer__link">
-            {link}
+          <a key={link.label} href={link.href} className="footer__link">
+            {link.label}
           </a>
         ))}
       </div>
