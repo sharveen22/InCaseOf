@@ -1855,3 +1855,69 @@ h1, h2, h3, h4, h5, h6 { font-size: inherit; font-weight: inherit; }
   .story__text { font-size: 14px; }
   .faq__question { font-size: 14px; }
 }
+
+/* ── Legal pages (privacy, terms) ── */
+.legal {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  padding: 60px 24px 80px;
+}
+.legal__container {
+  max-width: 720px;
+  margin: 0 auto;
+}
+.legal__back {
+  display: inline-block;
+  color: var(--accent);
+  text-decoration: none;
+  font-family: var(--font-heading), sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 32px;
+}
+.legal__back:hover { text-decoration: underline; }
+.legal__title {
+  font-family: var(--font-heading), sans-serif;
+  font-size: 36px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.legal__updated {
+  color: var(--text-muted);
+  font-size: 14px;
+  margin-bottom: 40px;
+}
+.legal__section {
+  margin-bottom: 32px;
+}
+.legal__section h2 {
+  font-family: var(--font-heading), sans-serif;
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.legal__section p {
+  font-size: 15px;
+  line-height: 1.7;
+  margin-bottom: 12px;
+}
+.legal__section ul {
+  padding-left: 24px;
+  margin-bottom: 12px;
+}
+.legal__section li {
+  font-size: 15px;
+  line-height: 1.7;
+  margin-bottom: 4px;
+}
+.legal__section a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.legal__section code {
+  background: var(--bg-alt);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+}
