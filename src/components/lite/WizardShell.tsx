@@ -63,11 +63,16 @@ export default function WizardShell() {
             <a href="/lite?reset-pin=1" className="wizard__logout">
               Reset PIN
             </a>
-            <form action="/api/auth/logout" method="POST">
-              <button type="submit" className="wizard__logout">
-                Sign out
-              </button>
-            </form>
+            <button
+              type="button"
+              className="wizard__logout"
+              onClick={async () => {
+                await fetch("/api/auth/logout", { method: "POST" });
+                window.location.href = "/";
+              }}
+            >
+              Sign out
+            </button>
           </div>
         )}
 
