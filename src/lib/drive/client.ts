@@ -254,7 +254,7 @@ export async function deleteFile(
 }
 
 function serviceAccountEmail(): string {
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim();
   if (!email) throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_EMAIL");
   return email;
 }
