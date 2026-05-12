@@ -5,6 +5,9 @@ import { unwrapDEK, decryptJSONWithDEK, decryptWithDEK, decryptJSON } from "@/li
 import { WizardProvider } from "@/contexts/WizardContext";
 import WizardShell from "./WizardShell";
 
+const ACCESS_CODE_LENGTH = 8;
+const LEGACY_PIN_LENGTH = 6;
+
 interface Props {
   folderId: string;
 }
@@ -18,8 +21,12 @@ export default function PinGateView({ folderId }: Props) {
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
 
+  const cleanCode = (value: string) => value.replace(/\D/g, "").slice(0, ACCESS_CODE_LENGTH);
+  const isAccessCodeLength = (value: string) =>
+    value.length === ACCESS_CODE_LENGTH || value.length === LEGACY_PIN_LENGTH;
+
   const handleVerify = async () => {
-    if (pin.length !== 6) return;
+    if (!isAccessCodeLength(pin)) return;
     setChecking(true);
     setError("");
 
@@ -33,7 +40,7 @@ export default function PinGateView({ folderId }: Props) {
       const json = await res.json();
 
       if (!res.ok || !json.valid) {
-        setError(json.error || "Incorrect PIN. Please try again.");
+        setError(json.error || "Incorrect access code. Please try again.");
         setPin("");
         setChecking(false);
         return;
@@ -100,37 +107,37 @@ export default function PinGateView({ folderId }: Props) {
     <div className="signin">
       <div className="signin__card">
         <h1 className="signin__logo">InCaseOf</h1>
-        <h2 className="signin__title">Enter access PIN</h2>
+        <h2 className="signin__title">Enter access code</h2>
         <p className="signin__sub">
-          This emergency kit is encrypted. Enter the 6-digit PIN provided by the owner to decrypt and view their information.
+          This emergency kit is protected. Enter the 8-digit access code provided by the owner to view their information.
         </p>
         <div className="pin-entry">
           <input
             className="pin-entry__input"
             type="password"
             inputMode="numeric"
-            maxLength={6}
+            maxLength={ACCESS_CODE_LENGTH}
             value={pin}
             onChange={(e) => {
-              setPin(e.target.value.replace(/\D/g, "").slice(0, 6));
+              setPin(cleanCode(e.target.value));
               setError("");
             }}
             onKeyDown={(e) => e.key === "Enter" && handleVerify()}
-            placeholder="------"
+            placeholder="--------"
             autoFocus
           />
           {error && <p className="pin-entry__error">{error}</p>}
           <button
             className="btn btn--gold"
             onClick={handleVerify}
-            disabled={pin.length !== 6 || checking}
+            disabled={!isAccessCodeLength(pin) || checking}
             style={{ width: "100%", marginTop: 16 }}
           >
             {checking ? "Decrypting..." : "Decrypt & View"}
           </button>
         </div>
         <p className="signin__fine">
-          All decryption happens in your browser. No data is sent unencrypted over the network.
+          Legacy 6-digit codes still work while accounts are being upgraded.
         </p>
       </div>
     </div>

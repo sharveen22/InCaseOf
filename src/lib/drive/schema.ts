@@ -137,6 +137,10 @@ export const STEP_FILES: StepFile[] = [
   "wishes",
 ];
 
+export function isStepFile(value: string): value is StepFile {
+  return (STEP_FILES as readonly string[]).includes(value);
+}
+
 export const STEP_LABELS: Record<StepFile, string> = {
   "about-you": "About You",
   health: "Health",
@@ -162,3 +166,9 @@ export const ALLOWED_MIME_TYPES = [
   "video/quicktime",
   "video/webm",
 ];
+
+export const ATTACHMENT_ID_PATTERN = /^[a-z0-9]{12,32}$/;
+
+export function isAttachmentId(value: string): boolean {
+  return ATTACHMENT_ID_PATTERN.test(value);
+}

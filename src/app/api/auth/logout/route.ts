@@ -1,7 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { requireSameOrigin } from "@/lib/auth/csrf";
 import { clearSession } from "@/lib/auth/session";
 
-export async function POST() {
+export async function POST(request: NextRequest) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   await clearSession();
   return NextResponse.json({ ok: true });
 }

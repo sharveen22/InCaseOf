@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSameOrigin } from "@/lib/auth/csrf";
 import { getSession, setSession } from "@/lib/auth/session";
 import { getAuthenticatedClient, refreshTokenIfNeeded } from "@/lib/auth/google";
 import {
@@ -10,7 +11,7 @@ import {
 } from "@/lib/drive/client";
 import { encryptJSONWithDEK, decryptJSONWithDEK } from "@/lib/crypto";
 import { demoStore } from "@/lib/demo-store";
-import type { MetadataFile } from "@/lib/drive/schema";
+import { isStepFile, type MetadataFile } from "@/lib/drive/schema";
 
 function isDemo(session: { drive_folder_id?: string }) {
   return session.drive_folder_id === "demo-local";
@@ -28,10 +29,13 @@ export async function GET(request: NextRequest) {
 
   const dek = getDEK(sessionData);
   if (!dek) {
-    return NextResponse.json({ error: "PIN not set" }, { status: 403 });
+    return NextResponse.json({ error: "Access code not set" }, { status: 403 });
   }
 
   const file = request.nextUrl.searchParams.get("file");
+  if (file && file !== "_all" && file !== "_meta" && !isStepFile(file)) {
+    return NextResponse.json({ error: "Invalid file parameter" }, { status: 400 });
+  }
 
   // Demo mode
   if (isDemo(sessionData)) {
@@ -128,6 +132,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const sessionData = await getSession();
   if (!sessionData) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -135,14 +142,17 @@ export async function POST(request: NextRequest) {
 
   const dek = getDEK(sessionData);
   if (!dek) {
-    return NextResponse.json({ error: "PIN not set" }, { status: 403 });
+    return NextResponse.json({ error: "Access code not set" }, { status: 403 });
   }
 
   const body = await request.json();
   const { file, data } = body as { file: string; data: unknown };
 
-  if (!file || !data) {
+  if (!file || data === undefined) {
     return NextResponse.json({ error: "Missing file or data" }, { status: 400 });
+  }
+  if (!isStepFile(file)) {
+    return NextResponse.json({ error: "Invalid file parameter" }, { status: 400 });
   }
 
   // Encrypt with DEK
@@ -151,14 +161,7 @@ export async function POST(request: NextRequest) {
   // Demo mode
   if (isDemo(sessionData)) {
     demoStore.set(`${file}.enc`, encrypted);
-    const stepIndex = [
-      "about-you",
-      "health",
-      "insurance",
-      "people",
-      "documents",
-      "wishes",
-    ].indexOf(file);
+    const stepIndex = ["about-you", "health", "insurance", "people", "documents", "wishes"].indexOf(file);
     if (stepIndex >= 0) {
       const existing = demoStore.get("_meta.json") as MetadataFile | null;
       if (existing) {
@@ -188,14 +191,7 @@ export async function POST(request: NextRequest) {
   const fileId = await writeEncrypted(auth, folderId, `${file}.enc`, encrypted);
 
   // Update metadata
-  const stepIndex = [
-    "about-you",
-    "health",
-    "insurance",
-    "people",
-    "documents",
-    "wishes",
-  ].indexOf(file);
+  const stepIndex = ["about-you", "health", "insurance", "people", "documents", "wishes"].indexOf(file);
   if (stepIndex >= 0) {
     const metaRaw = await readFileRaw(auth, folderId, "_meta.json");
     let metadata: MetadataFile | null = null;

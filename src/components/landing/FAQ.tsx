@@ -13,15 +13,15 @@ const faqs = [
   },
   {
     q: "Can you see my data?",
-    a: "No. Everything is encrypted with a PIN that only you and your emergency contact know. The files on your Drive are gibberish without that PIN. I have zero access.",
+    a: "Your emergency kit is encrypted before it is stored in your Google Drive. You sign in with Google to manage it, and your emergency contact needs the separate emergency access code to open the shared link.",
   },
   {
-    q: "What happens if I forget my PIN?",
-    a: "You'd need to start fresh. Set a new PIN and re-enter your info. That's the trade-off of real encryption. I can't recover it for you because I never have it.",
+    q: "What happens if I forget my emergency access code?",
+    a: "You can change it after signing in with Google. Your emergency contact will need the new code.",
   },
   {
     q: "How does my emergency contact access my info?",
-    a: "You share a link and give them your 6-digit PIN (separately, in person, over a call, etc). They open the link, enter the PIN, and everything decrypts right in their browser.",
+    a: "You share a link and give them your 8-digit access code separately, in person or over a call. They open the link, enter the code, and view your emergency kit.",
   },
   {
     q: "What if I don't have a Google account?",

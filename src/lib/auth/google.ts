@@ -8,6 +8,8 @@ const SCOPES = [
   "https://www.googleapis.com/auth/drive.file",
 ];
 
+const REQUIRED_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+
 export function createOAuth2Client() {
   return new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
@@ -16,19 +18,25 @@ export function createOAuth2Client() {
   );
 }
 
-export function getAuthUrl(): string {
+export function getAuthUrl(state: string, forceConsent = false): string {
   const client = createOAuth2Client();
   return client.generateAuthUrl({
     access_type: "offline",
-    prompt: "select_account",
+    prompt: forceConsent ? "consent select_account" : "select_account",
     scope: SCOPES,
-    include_granted_scopes: true,
+    include_granted_scopes: !forceConsent,
+    state,
   });
 }
 
 export async function exchangeCode(code: string) {
   const client = createOAuth2Client();
   const { tokens } = await client.getToken(code);
+  const grantedScopes = new Set((tokens.scope || "").split(/\s+/).filter(Boolean));
+  if (tokens.scope && !grantedScopes.has(REQUIRED_DRIVE_SCOPE)) {
+    throw new Error("missing_required_drive_scope");
+  }
+
   client.setCredentials(tokens);
 
   const oauth2 = google.oauth2({ version: "v2", auth: client });

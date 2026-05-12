@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from "react";
 
+const ACCESS_CODE_LENGTH = 8;
+const LEGACY_PIN_LENGTH = 6;
+
 interface Props {
   onUnlocked: () => void;
   initialMode?: "reset";
@@ -12,16 +15,34 @@ export default function PinSetup({ onUnlocked, initialMode }: Props) {
   const [confirmPin, setConfirmPin] = useState("");
   const [mode, setMode] = useState<"loading" | "setup" | "unlock" | "reset">(initialMode || "loading");
   const [error, setError] = useState("");
+  const [needsReauth, setNeedsReauth] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (initialMode) return; // Skip auto-detection when mode is forced
     fetch("/api/lite/pin")
       .then((r) => r.json())
-      .then((data) => {
+      .then(async (data) => {
         if (data.unlocked) {
           onUnlocked();
         } else if (data.has_pin) {
+          const res = await fetch("/api/lite/pin", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "owner_unlock" }),
+          });
+
+          if (res.ok) {
+            onUnlocked();
+            return;
+          }
+
+          const unlockData = await res.json().catch(() => null);
+          if (unlockData?.code === "access_code_required") {
+            setError("Enter your emergency access code once to finish upgrading this kit.");
+          } else {
+            setError(unlockData?.error || "We couldn't open your kit. Enter your emergency access code to continue.");
+          }
           setMode("unlock");
         } else {
           setMode("setup");
@@ -30,13 +51,18 @@ export default function PinSetup({ onUnlocked, initialMode }: Props) {
       .catch(() => setMode("setup"));
   }, [onUnlocked, initialMode]);
 
+  const cleanCode = (value: string) => value.replace(/\D/g, "").slice(0, ACCESS_CODE_LENGTH);
+  const isNewAccessCode = (value: string) => value.length === ACCESS_CODE_LENGTH;
+  const isUnlockCode = (value: string) =>
+    value.length === ACCESS_CODE_LENGTH || value.length === LEGACY_PIN_LENGTH;
+
   const handleSetup = async () => {
-    if (pin.length !== 6) {
-      setError("PIN must be 6 digits");
+    if (!isNewAccessCode(pin)) {
+      setError("Emergency access code must be 8 digits");
       return;
     }
     if (pin !== confirmPin) {
-      setError("PINs don't match");
+      setError("Emergency access codes don't match");
       return;
     }
     setSubmitting(true);
@@ -51,14 +77,20 @@ export default function PinSetup({ onUnlocked, initialMode }: Props) {
     if (res.ok) {
       onUnlocked();
     } else {
-      setError("Failed to set PIN. Please try again.");
+      const data = await res.json().catch(() => null);
+      if (data?.code === "reauth_required") {
+        setNeedsReauth(true);
+        setError("Google Drive permission needs to be refreshed before setup can continue.");
+      } else {
+        setError(data?.error || "Failed to set emergency access code. Please try again.");
+      }
     }
     setSubmitting(false);
   };
 
   const handleUnlock = async () => {
-    if (pin.length !== 6) {
-      setError("PIN must be 6 digits");
+    if (!isUnlockCode(pin)) {
+      setError("Enter your 8-digit emergency access code");
       return;
     }
     setSubmitting(true);
@@ -73,19 +105,20 @@ export default function PinSetup({ onUnlocked, initialMode }: Props) {
     if (res.ok) {
       onUnlocked();
     } else {
-      setError("Incorrect PIN");
+      const data = await res.json().catch(() => null);
+      setError(data?.error || "Incorrect emergency access code");
       setPin("");
     }
     setSubmitting(false);
   };
 
   const handleReset = async () => {
-    if (pin.length !== 6) {
-      setError("PIN must be 6 digits");
+    if (!isNewAccessCode(pin)) {
+      setError("Emergency access code must be 8 digits");
       return;
     }
     if (pin !== confirmPin) {
-      setError("PINs don't match");
+      setError("Emergency access codes don't match");
       return;
     }
     setSubmitting(true);
@@ -100,7 +133,8 @@ export default function PinSetup({ onUnlocked, initialMode }: Props) {
     if (res.ok) {
       onUnlocked();
     } else {
-      setError("Failed to reset PIN. Please try again.");
+      const data = await res.json().catch(() => null);
+      setError(data?.error || "Failed to change emergency access code. Please try again.");
     }
     setSubmitting(false);
   };
@@ -121,52 +155,61 @@ export default function PinSetup({ onUnlocked, initialMode }: Props) {
       <div className="signin">
         <div className="signin__card">
           <h1 className="signin__logo">InCaseOf</h1>
-          <h2 className="signin__title">Set your encryption PIN</h2>
+          <h2 className="signin__title">Set your emergency access code</h2>
           <p className="signin__sub">
-            Choose a 6-digit PIN to encrypt your emergency data. Everything stored on Google Drive will be protected by this PIN. Share it with your emergency contact so they can access your info.
+            Choose an 8-digit code for your emergency contact. Share it separately from the link so they can access your information when it matters.
           </p>
 
           <div className="pin-entry">
-            <label className="wizard__label">Create PIN</label>
+            <label className="wizard__label">Create Emergency Access Code</label>
             <input
               className="pin-entry__input"
               type="password"
               inputMode="numeric"
-              maxLength={6}
+              maxLength={ACCESS_CODE_LENGTH}
               value={pin}
-              onChange={(e) => { setPin(e.target.value.replace(/\D/g, "").slice(0, 6)); setError(""); }}
-              placeholder="------"
+              onChange={(e) => { setPin(cleanCode(e.target.value)); setError(""); }}
+              placeholder="--------"
               autoFocus
             />
           </div>
 
           <div className="pin-entry" style={{ marginTop: 16 }}>
-            <label className="wizard__label">Confirm PIN</label>
+            <label className="wizard__label">Confirm Emergency Access Code</label>
             <input
               className="pin-entry__input"
               type="password"
               inputMode="numeric"
-              maxLength={6}
+              maxLength={ACCESS_CODE_LENGTH}
               value={confirmPin}
-              onChange={(e) => { setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 6)); setError(""); }}
+              onChange={(e) => { setConfirmPin(cleanCode(e.target.value)); setError(""); }}
               onKeyDown={(e) => e.key === "Enter" && handleSetup()}
-              placeholder="------"
+              placeholder="--------"
             />
           </div>
 
           {error && <p className="pin-entry__error">{error}</p>}
+          {needsReauth && (
+            <a
+              className="signin__btn"
+              href="/api/auth/google?consent=1"
+              style={{ marginTop: 16 }}
+            >
+              Refresh Google Drive Permission
+            </a>
+          )}
 
           <button
             className="btn btn--gold"
             onClick={handleSetup}
-            disabled={pin.length !== 6 || confirmPin.length !== 6 || submitting}
+            disabled={needsReauth || !isNewAccessCode(pin) || !isNewAccessCode(confirmPin) || submitting}
             style={{ width: "100%", marginTop: 20 }}
           >
-            {submitting ? "Setting up..." : "Set PIN & Continue"}
+            {submitting ? "Setting up..." : "Set Emergency Code & Continue"}
           </button>
 
           <p className="signin__fine">
-            This PIN encrypts all your data. Without it, nobody (including me) can read your information on Google Drive.
+            Passphrase option coming soon. For now, keep this emergency code separate from your share link.
           </p>
         </div>
       </div>
@@ -178,36 +221,36 @@ export default function PinSetup({ onUnlocked, initialMode }: Props) {
       <div className="signin">
         <div className="signin__card">
           <h1 className="signin__logo">InCaseOf</h1>
-          <h2 className="signin__title">Reset your PIN</h2>
+          <h2 className="signin__title">Change emergency access code</h2>
           <p className="signin__sub">
-            Set a new 6-digit PIN. Your existing data will be preserved. Your emergency contact will need your new PIN.
+            Set a new 8-digit code for your emergency contact. Your existing data will be preserved, and your emergency contact will need the new code.
           </p>
 
           <div className="pin-entry">
-            <label className="wizard__label">New PIN</label>
+            <label className="wizard__label">New Emergency Access Code</label>
             <input
               className="pin-entry__input"
               type="password"
               inputMode="numeric"
-              maxLength={6}
+              maxLength={ACCESS_CODE_LENGTH}
               value={pin}
-              onChange={(e) => { setPin(e.target.value.replace(/\D/g, "").slice(0, 6)); setError(""); }}
-              placeholder="------"
+              onChange={(e) => { setPin(cleanCode(e.target.value)); setError(""); }}
+              placeholder="--------"
               autoFocus
             />
           </div>
 
           <div className="pin-entry" style={{ marginTop: 16 }}>
-            <label className="wizard__label">Confirm New PIN</label>
+            <label className="wizard__label">Confirm New Emergency Access Code</label>
             <input
               className="pin-entry__input"
               type="password"
               inputMode="numeric"
-              maxLength={6}
+              maxLength={ACCESS_CODE_LENGTH}
               value={confirmPin}
-              onChange={(e) => { setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 6)); setError(""); }}
+              onChange={(e) => { setConfirmPin(cleanCode(e.target.value)); setError(""); }}
               onKeyDown={(e) => e.key === "Enter" && handleReset()}
-              placeholder="------"
+              placeholder="--------"
             />
           </div>
 
@@ -216,21 +259,21 @@ export default function PinSetup({ onUnlocked, initialMode }: Props) {
           <button
             className="btn btn--gold"
             onClick={handleReset}
-            disabled={pin.length !== 6 || confirmPin.length !== 6 || submitting}
+            disabled={!isNewAccessCode(pin) || !isNewAccessCode(confirmPin) || submitting}
             style={{ width: "100%", marginTop: 20 }}
           >
-            {submitting ? "Resetting..." : "Reset PIN"}
+            {submitting ? "Changing..." : "Change Emergency Code"}
           </button>
 
           <button
             className="pin-entry__reset-link"
-            onClick={() => { setMode("unlock"); setPin(""); setConfirmPin(""); setError(""); }}
+            onClick={() => { onUnlocked(); }}
           >
-            Back to unlock
+            Back to kit
           </button>
 
           <p className="signin__fine">
-            Your data stays intact. Only the PIN used to access it will change.
+            Your data stays intact. Only the emergency code used by your share link will change.
           </p>
         </div>
       </div>
@@ -242,9 +285,9 @@ export default function PinSetup({ onUnlocked, initialMode }: Props) {
     <div className="signin">
       <div className="signin__card">
         <h1 className="signin__logo">InCaseOf</h1>
-        <h2 className="signin__title">Enter your PIN</h2>
+        <h2 className="signin__title">Enter emergency access code</h2>
         <p className="signin__sub">
-          Enter your 6-digit PIN to decrypt your emergency kit.
+          This is only needed to upgrade older kits. After this, Google sign-in will open your kit directly. Legacy 6-digit codes still work while accounts are being upgraded.
         </p>
 
         <div className="pin-entry">
@@ -252,11 +295,11 @@ export default function PinSetup({ onUnlocked, initialMode }: Props) {
             className="pin-entry__input"
             type="password"
             inputMode="numeric"
-            maxLength={6}
+            maxLength={ACCESS_CODE_LENGTH}
             value={pin}
-            onChange={(e) => { setPin(e.target.value.replace(/\D/g, "").slice(0, 6)); setError(""); }}
+            onChange={(e) => { setPin(cleanCode(e.target.value)); setError(""); }}
             onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
-            placeholder="------"
+            placeholder="--------"
             autoFocus
           />
           {error && <p className="pin-entry__error">{error}</p>}
@@ -265,17 +308,10 @@ export default function PinSetup({ onUnlocked, initialMode }: Props) {
         <button
           className="btn btn--gold"
           onClick={handleUnlock}
-          disabled={pin.length !== 6 || submitting}
+          disabled={!isUnlockCode(pin) || submitting}
           style={{ width: "100%", marginTop: 20 }}
         >
-          {submitting ? "Unlocking..." : "Unlock"}
-        </button>
-
-        <button
-          className="pin-entry__reset-link"
-          onClick={() => { setMode("reset"); setPin(""); setConfirmPin(""); setError(""); }}
-        >
-          Forgot your PIN?
+          {submitting ? "Opening..." : "Open Kit"}
         </button>
       </div>
     </div>

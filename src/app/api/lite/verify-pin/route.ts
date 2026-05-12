@@ -2,7 +2,27 @@ import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { demoStore } from "@/lib/demo-store";
 import { verifyPin } from "@/lib/crypto";
+import {
+  checkSharedViewLimit,
+  clearSharedViewFailures,
+  recordSharedViewFailure,
+} from "@/lib/rate-limit";
 import type { MetadataFile } from "@/lib/drive/schema";
+
+const ACCESS_CODE_LENGTH = 8;
+const LEGACY_PIN_LENGTH = 6;
+const DRIVE_ID_PATTERN = /^[A-Za-z0-9_-]{10,200}$/;
+
+function isValidAccessCode(pin: string): boolean {
+  return (
+    new RegExp(`^\\d{${ACCESS_CODE_LENGTH}}$`).test(pin) ||
+    new RegExp(`^\\d{${LEGACY_PIN_LENGTH}}$`).test(pin)
+  );
+}
+
+function driveQueryString(value: string): string {
+  return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
 
 /**
  * Download a publicly shared Drive file using the export URL.
@@ -32,20 +52,46 @@ export async function POST(request: NextRequest) {
   const { folderId, pin } = (await request.json()) as { folderId: string; pin: string };
 
   if (!folderId || !pin) {
-    return NextResponse.json({ error: "Missing folderId or pin" }, { status: 400 });
+    return NextResponse.json({ error: "Missing folderId or access code" }, { status: 400 });
+  }
+
+  if (folderId !== "demo-local" && !DRIVE_ID_PATTERN.test(folderId)) {
+    return NextResponse.json({ error: "Invalid folderId" }, { status: 400 });
+  }
+
+  if (!isValidAccessCode(pin)) {
+    return NextResponse.json({ error: "Access code must be 6 or 8 digits" }, { status: 400 });
+  }
+
+  const limit = await checkSharedViewLimit(folderId, request);
+  if (limit.limited) {
+    return NextResponse.json(
+      {
+        error: "Too many incorrect attempts. Please try again later.",
+        valid: false,
+      },
+      {
+        status: 429,
+        headers: limit.retryAfterSeconds
+          ? { "Retry-After": String(limit.retryAfterSeconds) }
+          : undefined,
+      }
+    );
   }
 
   // Demo mode
   if (folderId === "demo-local") {
     const meta = demoStore.get("_meta.json") as MetadataFile | null;
     if (!meta?.pin_check || !meta?.salt) {
-      return NextResponse.json({ error: "No PIN set" }, { status: 400 });
+      return NextResponse.json({ error: "No access code set" }, { status: 400 });
     }
 
     const valid = await verifyPin(pin, meta.salt, meta.pin_check);
     if (!valid) {
+      await recordSharedViewFailure(folderId, request);
       return NextResponse.json({ valid: false }, { status: 401 });
     }
+    await clearSharedViewFailures(folderId, request);
 
     const all = demoStore.getAll();
     const encryptedFiles: Record<string, string> = {};
@@ -78,7 +124,7 @@ export async function POST(request: NextRequest) {
 
     // List all files in the shared folder, newest first
     const filesList = await drive.files.list({
-      q: `'${folderId}' in parents and trashed=false`,
+      q: `${driveQueryString(folderId)} in parents and trashed=false`,
       fields: "files(id, name, modifiedTime)",
       orderBy: "modifiedTime desc",
       spaces: "drive",
@@ -97,13 +143,15 @@ export async function POST(request: NextRequest) {
     const meta = JSON.parse(metaRaw) as MetadataFile;
 
     if (!meta.pin_check || !meta.salt) {
-      return NextResponse.json({ error: "No PIN set" }, { status: 400 });
+      return NextResponse.json({ error: "No access code set" }, { status: 400 });
     }
 
     const valid = await verifyPin(pin, meta.salt, meta.pin_check);
     if (!valid) {
+      await recordSharedViewFailure(folderId, request);
       return NextResponse.json({ valid: false }, { status: 401 });
     }
+    await clearSharedViewFailures(folderId, request);
 
     // Download all .enc files using public download URLs
     const encryptedFiles: Record<string, string> = {};

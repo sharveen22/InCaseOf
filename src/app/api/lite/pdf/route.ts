@@ -10,7 +10,7 @@ import type { AboutYouData, HealthData, InsuranceData, PeopleData } from "@/lib/
 export async function GET() {
   const sessionData = await getSession();
   if (!sessionData?.drive_folder_id || !sessionData.dek) {
-    return NextResponse.json({ error: "Not authenticated or PIN not set" }, { status: 401 });
+    return NextResponse.json({ error: "Not authenticated or access code not set" }, { status: 401 });
   }
 
   const { dek } = sessionData;

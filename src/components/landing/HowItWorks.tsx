@@ -15,12 +15,12 @@ const steps = [
   {
     num: "02",
     title: "Get your number",
-    desc: "We assign you a dedicated phone number and a PIN-protected emergency card to carry with you.",
+    desc: "We assign you a dedicated phone number and an access-code-protected emergency card to carry with you.",
   },
   {
     num: "03",
     title: "We handle it",
-    desc: "When someone calls about you, a real person answers, verifies with your PIN, and follows your action plan.",
+    desc: "When someone opens your kit, they use the emergency access code you shared separately.",
   },
 ];
 

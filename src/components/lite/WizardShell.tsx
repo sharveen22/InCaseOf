@@ -61,7 +61,7 @@ export default function WizardShell() {
         {!readOnly && (
           <div className="wizard__sidebar-footer">
             <a href="/lite?reset-pin=1" className="wizard__logout">
-              Reset PIN
+              Change Emergency Code
             </a>
             <button
               type="button"

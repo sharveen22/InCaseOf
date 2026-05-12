@@ -31,7 +31,7 @@ export default function CTA() {
           Your emergency info, organised and shareable — so the people around you
           know exactly what to do.
         </p>
-        <a href="/lite" className="btn btn--gold">
+        <a href="/api/auth/google?consent=1" className="btn btn--gold">
           Get started — it&apos;s free
         </a>
         <p className="cta__fine">

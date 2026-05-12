@@ -29,8 +29,9 @@ export default function PrivacyPage() {
             copy, or retain any of your personal information on our servers.
           </p>
           <p>
-            Your data is encrypted with a PIN you choose. The encryption and decryption
-            happen entirely in your browser. We never see your PIN or your unencrypted data.
+            Your emergency kit is encrypted before it is stored in Google Drive. You sign in
+            with Google to manage your kit, and your shared emergency link is protected by
+            an emergency access code you choose. Keep that code separate from your share link.
           </p>
         </section>
 
@@ -43,8 +44,9 @@ export default function PrivacyPage() {
             any other files in your Google Drive.
           </p>
           <p>We use your Google account information (name, email, profile picture) solely
-            to personalise your experience within the app. We do not share this information
-            with third parties.</p>
+            to personalise your experience within the app and help you change your emergency
+            access code when you are signed in. We do not share this information with third
+            parties.</p>
         </section>
 
         <section className="legal__section">
@@ -73,7 +75,7 @@ export default function PrivacyPage() {
           <p>
             When you choose to share your emergency kit, we set the Google Drive folder
             permissions to &ldquo;anyone with the link can view.&rdquo; Your emergency
-            contact will need both the link and your 6-digit PIN to decrypt and view the
+            contact will need both the link and your 8-digit emergency access code to view the
             information. You can revoke access at any time by changing the folder
             permissions in Google Drive.
           </p>

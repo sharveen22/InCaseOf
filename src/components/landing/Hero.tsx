@@ -109,8 +109,11 @@ export default function Hero() {
         </p>
 
         <div ref={btnsRef} className="hero__btns">
-          <a href="/lite" className="btn btn--gold">
+          <a href="/api/auth/google?consent=1" className="btn btn--gold">
             Get started, it&apos;s free
+          </a>
+          <a href="/api/auth/google" className="btn btn--outline-light">
+            Log in
           </a>
           <a href="#story" className="btn btn--outline-light">
             Why I built this
