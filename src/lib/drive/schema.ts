@@ -109,6 +109,13 @@ export interface MetadataFile {
   version: number;
 }
 
+export interface ShareManifestFile {
+  version: number;
+  share_secret_hash: string;
+  created_at: string;
+  revoked_at: string | null;
+}
+
 // --- Step definitions ---
 
 export type StepFile =

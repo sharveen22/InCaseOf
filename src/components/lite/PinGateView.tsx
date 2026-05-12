@@ -9,12 +9,12 @@ const ACCESS_CODE_LENGTH = 8;
 const LEGACY_PIN_LENGTH = 6;
 
 interface Props {
-  folderId: string;
+  shareToken: string;
 }
 
 type ViewData = Record<string, unknown>;
 
-export default function PinGateView({ folderId }: Props) {
+export default function PinGateView({ shareToken }: Props) {
   const [pin, setPin] = useState("");
   const [data, setData] = useState<ViewData | null>(null);
   const [attachmentUrls, setAttachmentUrls] = useState<Record<string, string>>({});
@@ -34,7 +34,7 @@ export default function PinGateView({ folderId }: Props) {
       const res = await fetch("/api/lite/verify-pin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folderId, pin }),
+        body: JSON.stringify({ folderId: shareToken, pin }),
       });
 
       const json = await res.json();

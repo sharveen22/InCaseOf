@@ -5,7 +5,7 @@ export default async function ViewPage({
 }: {
   params: Promise<{ folderId: string }>;
 }) {
-  const { folderId } = await params;
+  const { folderId: shareToken } = await params;
 
-  return <PinGateView folderId={folderId} />;
+  return <PinGateView shareToken={shareToken} />;
 }

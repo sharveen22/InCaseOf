@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { google } from "googleapis";
 import { demoStore } from "@/lib/demo-store";
 import { verifyPin } from "@/lib/crypto";
+import { getServiceAccountClient, listFiles, readFileRaw } from "@/lib/drive/client";
 import {
   checkSharedViewLimit,
   clearSharedViewFailures,
   recordSharedViewFailure,
 } from "@/lib/rate-limit";
-import type { MetadataFile } from "@/lib/drive/schema";
+import { decodeShareToken, shareSecretsMatch } from "@/lib/share-token";
+import type { MetadataFile, ShareManifestFile } from "@/lib/drive/schema";
 
 const ACCESS_CODE_LENGTH = 8;
 const LEGACY_PIN_LENGTH = 6;
-const DRIVE_ID_PATTERN = /^[A-Za-z0-9_-]{10,200}$/;
 
 function isValidAccessCode(pin: string): boolean {
   return (
@@ -20,50 +20,37 @@ function isValidAccessCode(pin: string): boolean {
   );
 }
 
-function driveQueryString(value: string): string {
-  return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
-}
-
-/**
- * Download a publicly shared Drive file using the export URL.
- * This avoids the Drive API rate limiting / bot detection.
- */
-async function downloadPublicFile(fileId: string): Promise<string> {
-  // Use the Google Drive direct download link for public files
-  const url = `https://drive.google.com/uc?id=${fileId}&export=download`;
-  const res = await fetch(url, {
-    redirect: "follow",
-    headers: {
-      "User-Agent": "InCaseOf/1.0",
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`Download failed (${res.status})`);
+function parseJson<T>(raw: string | null): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
   }
-  return res.text();
+}
+
+function isValidShare(manifest: ShareManifestFile | null, shareSecret: string): boolean {
+  if (!manifest || manifest.version !== 1 || manifest.revoked_at) return false;
+  return shareSecretsMatch(manifest.share_secret_hash, shareSecret);
 }
 
 /**
- * POST — Verify PIN for shared view. Returns encrypted files + wrapped_dek + salt
+ * POST — Verify access code for shared view. Returns encrypted files + wrapped_dek + salt
  * so the client can unwrap the DEK and decrypt everything in the browser.
- * Body: { folderId, pin }
+ * Body: { folderId: shareToken, pin }
  */
 export async function POST(request: NextRequest) {
-  const { folderId, pin } = (await request.json()) as { folderId: string; pin: string };
+  const { folderId: shareToken, pin } = (await request.json()) as { folderId: string; pin: string };
 
-  if (!folderId || !pin) {
-    return NextResponse.json({ error: "Missing folderId or access code" }, { status: 400 });
-  }
-
-  if (folderId !== "demo-local" && !DRIVE_ID_PATTERN.test(folderId)) {
-    return NextResponse.json({ error: "Invalid folderId" }, { status: 400 });
+  if (!shareToken || !pin) {
+    return NextResponse.json({ error: "Missing share link or access code" }, { status: 400 });
   }
 
   if (!isValidAccessCode(pin)) {
     return NextResponse.json({ error: "Access code must be 6 or 8 digits" }, { status: 400 });
   }
 
-  const limit = await checkSharedViewLimit(folderId, request);
+  const limit = await checkSharedViewLimit(shareToken, request);
   if (limit.limited) {
     return NextResponse.json(
       {
@@ -80,7 +67,21 @@ export async function POST(request: NextRequest) {
   }
 
   // Demo mode
+  const sharePayload = decodeShareToken(shareToken);
+  const isLegacyDemo = shareToken === "demo-local";
+  if (!sharePayload && !isLegacyDemo) {
+    return NextResponse.json({ error: "Invalid or expired share link", valid: false }, { status: 400 });
+  }
+
+  const folderId = sharePayload?.folderId || "demo-local";
+  const shareSecret = sharePayload?.shareSecret || "";
+
   if (folderId === "demo-local") {
+    const shareManifest = demoStore.get("_share.json") as ShareManifestFile | null;
+    if (sharePayload && !isValidShare(shareManifest, shareSecret)) {
+      return NextResponse.json({ error: "This share link is no longer valid", valid: false }, { status: 403 });
+    }
+
     const meta = demoStore.get("_meta.json") as MetadataFile | null;
     if (!meta?.pin_check || !meta?.salt) {
       return NextResponse.json({ error: "No access code set" }, { status: 400 });
@@ -88,10 +89,10 @@ export async function POST(request: NextRequest) {
 
     const valid = await verifyPin(pin, meta.salt, meta.pin_check);
     if (!valid) {
-      await recordSharedViewFailure(folderId, request);
+      await recordSharedViewFailure(shareToken, request);
       return NextResponse.json({ valid: false }, { status: 401 });
     }
-    await clearSharedViewFailures(folderId, request);
+    await clearSharedViewFailures(shareToken, request);
 
     const all = demoStore.getAll();
     const encryptedFiles: Record<string, string> = {};
@@ -109,38 +110,19 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // Production: read from shared (public) Drive folder
-  const apiKey = process.env.GOOGLE_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "Server misconfigured: missing GOOGLE_API_KEY" },
-      { status: 500 }
-    );
-  }
-
   try {
-    // Use googleapis library for listing (works fine with API key)
-    const drive = google.drive({ version: "v3", auth: apiKey });
-
-    // List all files in the shared folder, newest first
-    const filesList = await drive.files.list({
-      q: `${driveQueryString(folderId)} in parents and trashed=false`,
-      fields: "files(id, name, modifiedTime)",
-      orderBy: "modifiedTime desc",
-      spaces: "drive",
-    });
-
-    const files = filesList.data.files || [];
-
-    // Find _meta.json
-    const metaFile = files.find(f => f.name === "_meta.json");
-    if (!metaFile?.id) {
-      return NextResponse.json({ error: "No metadata found" }, { status: 400 });
+    const auth = getServiceAccountClient();
+    const shareManifest = parseJson<ShareManifestFile>(
+      await readFileRaw(auth, folderId, "_share.json")
+    );
+    if (!isValidShare(shareManifest, shareSecret)) {
+      return NextResponse.json({ error: "This share link is no longer valid", valid: false }, { status: 403 });
     }
 
-    // Download _meta.json content using public download URL
-    const metaRaw = await downloadPublicFile(metaFile.id);
-    const meta = JSON.parse(metaRaw) as MetadataFile;
+    const meta = parseJson<MetadataFile>(await readFileRaw(auth, folderId, "_meta.json"));
+    if (!meta) {
+      return NextResponse.json({ error: "No metadata found" }, { status: 400 });
+    }
 
     if (!meta.pin_check || !meta.salt) {
       return NextResponse.json({ error: "No access code set" }, { status: 400 });
@@ -148,26 +130,24 @@ export async function POST(request: NextRequest) {
 
     const valid = await verifyPin(pin, meta.salt, meta.pin_check);
     if (!valid) {
-      await recordSharedViewFailure(folderId, request);
+      await recordSharedViewFailure(shareToken, request);
       return NextResponse.json({ valid: false }, { status: 401 });
     }
-    await clearSharedViewFailures(folderId, request);
+    await clearSharedViewFailures(shareToken, request);
 
-    // Download all .enc files using public download URLs
     const encryptedFiles: Record<string, string> = {};
-    const encFiles = files.filter(f => f.name?.endsWith(".enc") && f.id);
+    const encFiles = (await listFiles(auth, folderId)).filter((file) => file.name.endsWith(".enc"));
 
-    // Download in parallel for speed
     const downloads = await Promise.allSettled(
       encFiles.map(async (file) => {
-        const content = await downloadPublicFile(file.id!);
-        const key = file.name!.replace(".enc", "");
+        const content = await readFileRaw(auth, folderId, file.name);
+        const key = file.name.replace(".enc", "");
         return { key, content };
       })
     );
 
     for (const result of downloads) {
-      if (result.status === "fulfilled") {
+      if (result.status === "fulfilled" && result.value.content) {
         encryptedFiles[result.value.key] = result.value.content;
       }
     }

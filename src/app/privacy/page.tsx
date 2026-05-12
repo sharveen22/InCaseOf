@@ -73,11 +73,12 @@ export default function PrivacyPage() {
         <section className="legal__section">
           <h2>Sharing your emergency information</h2>
           <p>
-            When you choose to share your emergency kit, we set the Google Drive folder
-            permissions to &ldquo;anyone with the link can view.&rdquo; Your emergency
-            contact will need both the link and your 8-digit emergency access code to view the
-            information. You can revoke access at any time by changing the folder
-            permissions in Google Drive.
+            When you choose to share your emergency kit, your Google Drive folder stays
+            private. We grant a narrow InCaseOf service account read-only access to that
+            folder so the emergency view can be served after the private link and your
+            8-digit emergency access code are verified. You can revoke access at any time
+            from the app, which invalidates the share and removes that service account
+            permission.
           </p>
         </section>
 

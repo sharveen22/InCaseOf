@@ -167,7 +167,7 @@ export default function Wishes() {
               Your emergency kit is protected by your emergency access code. Share the link and code with your emergency contact separately.
             </p>
             <div className="wizard__share-warning">
-              Creating a share link makes the encrypted Google Drive folder viewable by anyone with the link. They still need your emergency access code to view the kit.
+              Creating a share link keeps your Google Drive folder private. InCaseOf only serves the emergency view after the private link and emergency access code are verified.
             </div>
             <div className="wizard__complete-actions">
               <button className="btn btn--gold" onClick={handleShare} disabled={sharing}>

@@ -1,10 +1,12 @@
 import { google } from "googleapis";
-import type { OAuth2Client } from "google-auth-library";
+import type { JWT, OAuth2Client } from "google-auth-library";
 import { Readable } from "stream";
 
 const FOLDER_NAME = "InCaseOf Emergency Kit";
 
-function getDrive(auth: OAuth2Client) {
+type DriveAuth = OAuth2Client | JWT;
+
+function getDrive(auth: DriveAuth) {
   return google.drive({ version: "v3", auth });
 }
 
@@ -43,7 +45,7 @@ export async function createIncaseFolder(auth: OAuth2Client): Promise<string> {
  * Write a plain text/JSON file (used for _meta.json which is unencrypted)
  */
 export async function writeFileRaw(
-  auth: OAuth2Client,
+  auth: DriveAuth,
   folderId: string,
   filename: string,
   content: string,
@@ -73,7 +75,7 @@ export async function writeFileRaw(
  * Write encrypted data (base64url string) as a binary file
  */
 export async function writeEncrypted(
-  auth: OAuth2Client,
+  auth: DriveAuth,
   folderId: string,
   filename: string,
   encryptedData: string
@@ -86,7 +88,7 @@ export async function writeEncrypted(
  * Write binary data (for encrypted file uploads)
  */
 export async function writeBinary(
-  auth: OAuth2Client,
+  auth: DriveAuth,
   folderId: string,
   filename: string,
   data: Buffer
@@ -120,7 +122,7 @@ export async function writeBinary(
  * Read a file's content as string
  */
 export async function readFileRaw(
-  auth: OAuth2Client,
+  auth: DriveAuth,
   folderId: string,
   filename: string
 ): Promise<string | null> {
@@ -144,7 +146,7 @@ export async function readFileRaw(
  * Read a file as binary buffer
  */
 export async function readFileBinary(
-  auth: OAuth2Client,
+  auth: DriveAuth,
   folderId: string,
   filename: string
 ): Promise<Buffer | null> {
@@ -164,7 +166,7 @@ export async function readFileBinary(
  * Find a file by name within a folder
  */
 export async function findFileByName(
-  auth: OAuth2Client,
+  auth: DriveAuth,
   folderId: string,
   filename: string
 ): Promise<string | null> {
@@ -185,7 +187,7 @@ export async function findFileByName(
  * List all files in a folder
  */
 export async function listFiles(
-  auth: OAuth2Client,
+  auth: DriveAuth,
   folderId: string
 ): Promise<{ name: string; id: string }[]> {
   const drive = getDrive(auth);
@@ -205,7 +207,7 @@ export async function listFiles(
  * Returns { _meta: MetadataFile, "about-you": "encrypted...", health: "encrypted...", ... }
  */
 export async function readAllFiles(
-  auth: OAuth2Client,
+  auth: DriveAuth,
   folderId: string
 ): Promise<Record<string, string>> {
   const drive = getDrive(auth);
@@ -240,7 +242,7 @@ export async function readAllFiles(
  * Delete a file from the folder
  */
 export async function deleteFile(
-  auth: OAuth2Client,
+  auth: DriveAuth,
   folderId: string,
   filename: string
 ): Promise<void> {
@@ -251,26 +253,84 @@ export async function deleteFile(
   await drive.files.delete({ fileId });
 }
 
-/**
- * Share folder with "anyone with link can view"
- */
-export async function shareFolder(
+function serviceAccountEmail(): string {
+  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  if (!email) throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_EMAIL");
+  return email;
+}
+
+export function getServiceAccountClient(): JWT {
+  const email = serviceAccountEmail();
+  const key = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY
+    ?.replace(/\\\\n/g, "\n")
+    .replace(/\\n/g, "\n");
+  if (!key) throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY");
+
+  return new google.auth.JWT({
+    email,
+    key,
+    scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+  });
+}
+
+export async function grantServiceAccountFolderAccess(
   auth: OAuth2Client,
   folderId: string
-): Promise<string> {
+): Promise<void> {
   const drive = getDrive(auth);
+  const email = serviceAccountEmail();
+  const permissions = await drive.permissions.list({
+    fileId: folderId,
+    fields: "permissions(id, type, emailAddress, role)",
+  });
+
+  const existing = (permissions.data.permissions || []).find(
+    (permission) => permission.type === "user" && permission.emailAddress === email
+  );
+  if (existing?.role === "reader") return;
 
   await drive.permissions.create({
     fileId: folderId,
-    requestBody: { role: "reader", type: "anyone" },
+    requestBody: {
+      role: "reader",
+      type: "user",
+      emailAddress: email,
+    },
+    sendNotificationEmail: false,
+    fields: "id",
   });
+}
 
-  const file = await drive.files.get({
+export async function revokeServiceAccountFolderAccess(
+  auth: OAuth2Client,
+  folderId: string
+): Promise<void> {
+  const drive = getDrive(auth);
+  const email = serviceAccountEmail();
+  const permissions = await drive.permissions.list({
     fileId: folderId,
-    fields: "webViewLink",
+    fields: "permissions(id, type, emailAddress)",
   });
 
-  return file.data.webViewLink || "";
+  const servicePermissions = (permissions.data.permissions || []).filter(
+    (permission) => permission.id && permission.type === "user" && permission.emailAddress === email
+  );
+
+  await Promise.all(
+    servicePermissions.map((permission) =>
+      drive.permissions
+        .delete({
+          fileId: folderId,
+          permissionId: permission.id!,
+        })
+        .catch((err: unknown) => {
+          const status = typeof err === "object" && err !== null && "code" in err
+            ? (err as { code?: number }).code
+            : undefined;
+          if (status !== 404) throw err;
+        })
+    )
+  );
 }
 
 /**
