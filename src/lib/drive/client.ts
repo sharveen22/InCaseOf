@@ -8,6 +8,10 @@ function getDrive(auth: OAuth2Client) {
   return google.drive({ version: "v3", auth });
 }
 
+function driveQueryString(value: string): string {
+  return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
+
 /**
  * Create the InCaseOf folder on Drive (or find existing)
  */
@@ -15,7 +19,7 @@ export async function createIncaseFolder(auth: OAuth2Client): Promise<string> {
   const drive = getDrive(auth);
 
   const existing = await drive.files.list({
-    q: `name='${FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+    q: `name=${driveQueryString(FOLDER_NAME)} and mimeType='application/vnd.google-apps.folder' and trashed=false`,
     fields: "files(id)",
     spaces: "drive",
   });
@@ -166,7 +170,7 @@ export async function findFileByName(
 ): Promise<string | null> {
   const drive = getDrive(auth);
   const result = await drive.files.list({
-    q: `name='${filename}' and '${folderId}' in parents and trashed=false`,
+    q: `name=${driveQueryString(filename)} and ${driveQueryString(folderId)} in parents and trashed=false`,
     fields: "files(id)",
     spaces: "drive",
   });
@@ -186,7 +190,7 @@ export async function listFiles(
 ): Promise<{ name: string; id: string }[]> {
   const drive = getDrive(auth);
   const result = await drive.files.list({
-    q: `'${folderId}' in parents and trashed=false`,
+    q: `${driveQueryString(folderId)} in parents and trashed=false`,
     fields: "files(id, name)",
     spaces: "drive",
   });
@@ -267,4 +271,38 @@ export async function shareFolder(
   });
 
   return file.data.webViewLink || "";
+}
+
+/**
+ * Remove public "anyone with link" permissions from the folder.
+ */
+export async function unshareFolder(
+  auth: OAuth2Client,
+  folderId: string
+): Promise<void> {
+  const drive = getDrive(auth);
+  const permissions = await drive.permissions.list({
+    fileId: folderId,
+    fields: "permissions(id, type)",
+  });
+
+  const publicPermissions = (permissions.data.permissions || []).filter(
+    (permission) => permission.id && permission.type === "anyone"
+  );
+
+  await Promise.all(
+    publicPermissions.map((permission) =>
+      drive.permissions
+        .delete({
+          fileId: folderId,
+          permissionId: permission.id!,
+        })
+        .catch((err: unknown) => {
+          const status = typeof err === "object" && err !== null && "code" in err
+            ? (err as { code?: number }).code
+            : undefined;
+          if (status !== 404) throw err;
+        })
+    )
+  );
 }

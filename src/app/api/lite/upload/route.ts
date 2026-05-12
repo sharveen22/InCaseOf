@@ -1,19 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSameOrigin } from "@/lib/auth/csrf";
 import { getSession, setSession } from "@/lib/auth/session";
 import { getAuthenticatedClient, refreshTokenIfNeeded } from "@/lib/auth/google";
 import { createIncaseFolder, writeEncrypted, deleteFile } from "@/lib/drive/client";
 import { encryptWithDEK } from "@/lib/crypto";
 import { demoStore } from "@/lib/demo-store";
-import { MAX_UPLOAD_SIZE, ALLOWED_MIME_TYPES } from "@/lib/drive/schema";
+import { MAX_UPLOAD_SIZE, ALLOWED_MIME_TYPES, isAttachmentId } from "@/lib/drive/schema";
 
 /**
  * POST — Upload a file (encrypted)
  * Expects multipart/form-data with field "file" and "attachmentId"
  */
 export async function POST(request: NextRequest) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const sessionData = await getSession();
   if (!sessionData?.dek) {
-    return NextResponse.json({ error: "Not authenticated or PIN not set" }, { status: 401 });
+    return NextResponse.json({ error: "Not authenticated or access code not set" }, { status: 401 });
   }
 
   const formData = await request.formData();
@@ -22,6 +26,9 @@ export async function POST(request: NextRequest) {
 
   if (!file || !attachmentId) {
     return NextResponse.json({ error: "Missing file or attachmentId" }, { status: 400 });
+  }
+  if (!isAttachmentId(attachmentId)) {
+    return NextResponse.json({ error: "Invalid attachmentId" }, { status: 400 });
   }
 
   // Validate size
@@ -80,6 +87,9 @@ export async function POST(request: NextRequest) {
  * DELETE — Remove an uploaded file
  */
 export async function DELETE(request: NextRequest) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const sessionData = await getSession();
   if (!sessionData) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -88,6 +98,9 @@ export async function DELETE(request: NextRequest) {
   const { attachmentId } = (await request.json()) as { attachmentId: string };
   if (!attachmentId) {
     return NextResponse.json({ error: "Missing attachmentId" }, { status: 400 });
+  }
+  if (!isAttachmentId(attachmentId)) {
+    return NextResponse.json({ error: "Invalid attachmentId" }, { status: 400 });
   }
 
   const filename = `att_${attachmentId}.enc`;

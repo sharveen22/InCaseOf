@@ -121,7 +121,7 @@ export default function Story() {
             </div>
             <div className="story__feature">
               <span className="story__feature-label">The Storage</span>
-              <p className="story__text">Everything is saved to a folder on your Drive, encrypted with a PIN.</p>
+              <p className="story__text">Everything is saved to a folder on your Drive, with the shared link protected by your emergency access code.</p>
             </div>
             <div className="story__feature">
               <span className="story__feature-label">The Access</span>
@@ -140,7 +140,7 @@ export default function Story() {
           <div className="story__features">
             <div className="story__feature">
               <span className="story__feature-label">Zero Footprint</span>
-              <p className="story__text">No app to download. No account for your contact to create. Just a link and a PIN.</p>
+              <p className="story__text">No app to download. No account for your contact to create. Just a link and an emergency access code.</p>
             </div>
             <div className="story__feature">
               <span className="story__feature-label">Total Privacy</span>
@@ -157,7 +157,7 @@ export default function Story() {
         </div>
 
         <div className="story__cta">
-          <a href="/lite" className="btn btn--gold">
+          <a href="/api/auth/google?consent=1" className="btn btn--gold">
             Set up your emergency kit
           </a>
         </div>

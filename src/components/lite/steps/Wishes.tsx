@@ -22,6 +22,7 @@ export default function Wishes() {
   const [form, setForm] = useState<WishesData>(EMPTY);
   const [shareLink, setShareLink] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [shareError, setShareError] = useState("");
 
   useEffect(() => {
     const saved = data["wishes"] as WishesData | undefined;
@@ -34,11 +35,35 @@ export default function Wishes() {
 
   const handleShare = async () => {
     setSharing(true);
+    setShareError("");
     try {
       const res = await fetch("/api/lite/share", { method: "POST" });
       const json = await res.json();
-      if (json.viewLink) setShareLink(json.viewLink);
-    } catch { /* ignore */ }
+      if (res.ok && json.viewLink) {
+        setShareLink(json.viewLink);
+      } else {
+        setShareError(json.error || "Could not create share link. Please try again.");
+      }
+    } catch {
+      setShareError("Could not create share link. Please try again.");
+    }
+    setSharing(false);
+  };
+
+  const handleRevokeShare = async () => {
+    setSharing(true);
+    setShareError("");
+    try {
+      const res = await fetch("/api/lite/share", { method: "DELETE" });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setShareLink(null);
+      } else {
+        setShareError(json.error || "Could not revoke shared access. Please try again.");
+      }
+    } catch {
+      setShareError("Could not revoke shared access. Please try again.");
+    }
     setSharing(false);
   };
 
@@ -139,22 +164,31 @@ export default function Wishes() {
           <div className="wizard__complete">
             <h3 className="wizard__complete-title">Your emergency kit is ready.</h3>
             <p className="wizard__complete-sub">
-              All data is encrypted with your PIN. Share the link and PIN with your emergency contact.
+              Your emergency kit is protected by your emergency access code. Share the link and code with your emergency contact separately.
             </p>
+            <div className="wizard__share-warning">
+              Creating a share link makes the encrypted Google Drive folder viewable by anyone with the link. They still need your emergency access code to view the kit.
+            </div>
             <div className="wizard__complete-actions">
               <button className="btn btn--gold" onClick={handleShare} disabled={sharing}>
-                {sharing ? "Creating link..." : "Share with my contact"}
+                {sharing ? "Working..." : shareLink ? "Refresh share link" : "Share with my contact"}
               </button>
+              {shareLink && (
+                <button className="btn btn--outline-dark" onClick={handleRevokeShare} disabled={sharing}>
+                  Revoke shared access
+                </button>
+              )}
               <a href="/api/lite/pdf" className="btn btn--outline-dark" download="incaseof-emergency-card.pdf">
                 Download emergency card (PDF)
               </a>
             </div>
+            {shareError && <p className="wizard__share-error">{shareError}</p>}
             {shareLink && (
               <div className="wizard__share-link">
                 <label className="wizard__label">Share this link with your emergency contact:</label>
                 <input className="wizard__input" readOnly value={shareLink} onClick={(e) => (e.target as HTMLInputElement).select()} />
                 <p className="wizard__hint">
-                  They will need your 6-digit PIN to decrypt and view your information.
+                  They will need your 8-digit emergency access code to view your information. Use revoke when this link should stop working.
                 </p>
               </div>
             )}

@@ -19,7 +19,10 @@ export default function Navbar() {
       <div className="nav__inner">
         <span className="nav__logo">InCaseOf</span>
         <div className="nav__links">
-          <a href="/lite" className="nav__cta">
+          <a href="/api/auth/google" className="nav__cta nav__cta--secondary">
+            Log in
+          </a>
+          <a href="/api/auth/google?consent=1" className="nav__cta">
             Get Started Free
           </a>
         </div>

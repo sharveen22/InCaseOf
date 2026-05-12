@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSameOrigin } from "@/lib/auth/csrf";
 import { getSession, setSession } from "@/lib/auth/session";
 import { getAuthenticatedClient, refreshTokenIfNeeded } from "@/lib/auth/google";
 import { createIncaseFolder, readFileRaw, writeFileRaw } from "@/lib/drive/client";
@@ -14,6 +15,27 @@ import {
 } from "@/lib/crypto";
 import { demoStore } from "@/lib/demo-store";
 import type { MetadataFile } from "@/lib/drive/schema";
+
+const ACCESS_CODE_LENGTH = 8;
+const LEGACY_PIN_LENGTH = 6;
+
+function isNumericCode(pin: string, length: number): boolean {
+  return new RegExp(`^\\d{${length}}$`).test(pin);
+}
+
+type PinAction = "setup" | "unlock" | "reset" | "owner_unlock";
+
+function isValidCodeForAction(pin: string, action: PinAction): boolean {
+  if (action === "unlock") {
+    return isNumericCode(pin, ACCESS_CODE_LENGTH) || isNumericCode(pin, LEGACY_PIN_LENGTH);
+  }
+  return isNumericCode(pin, ACCESS_CODE_LENGTH);
+}
+
+function isInsufficientScopeError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return err.message.toLowerCase().includes("insufficient authentication scopes");
+}
 
 /**
  * GET — Check if a PIN has been set
@@ -67,30 +89,42 @@ export async function GET() {
 }
 
 /**
- * POST — Set a new PIN, verify an existing PIN, or reset PIN
- * Body: { pin: string, action: "setup" | "unlock" | "reset" }
+ * POST — Set a new access code, verify an existing code, reset code, or unlock for the owner
+ * Body: { pin?: string, action: "setup" | "unlock" | "reset" | "owner_unlock" }
  */
 export async function POST(request: NextRequest) {
+  const originError = requireSameOrigin(request);
+  if (originError) return originError;
+
   const sessionData = await getSession();
   if (!sessionData) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
   const { pin, action } = (await request.json()) as {
-    pin: string;
-    action: "setup" | "unlock" | "reset";
+    pin?: string;
+    action: PinAction;
   };
 
-  if (!pin || !/^\d{6}$/.test(pin)) {
-    return NextResponse.json({ error: "PIN must be 6 digits" }, { status: 400 });
+  if (!["setup", "unlock", "reset", "owner_unlock"].includes(action)) {
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+  }
+
+  if (action !== "owner_unlock" && (!pin || !isValidCodeForAction(pin, action))) {
+    const message =
+      action === "unlock"
+        ? "Access code must be 6 or 8 digits"
+        : "Access code must be 8 digits";
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 
   // --- SETUP: Create new PIN + DEK ---
   if (action === "setup") {
+    const newPin = pin!;
     const salt = generateSalt();
-    const pinCheck = await generatePinCheck(pin, salt);
+    const pinCheck = await generatePinCheck(newPin, salt);
     const dek = generateDEK();
-    const wrappedDEK = await wrapDEK(dek, pin, salt);
+    const wrappedDEK = await wrapDEK(dek, newPin, salt);
     const recoveryDEK = await wrapDEKForRecovery(dek, sessionData.email);
 
     const metadata: MetadataFile = {
@@ -104,26 +138,40 @@ export async function POST(request: NextRequest) {
       version: 2,
     };
 
-    if (sessionData.drive_folder_id === "demo-local") {
-      demoStore.set("_meta.json", metadata);
-    } else {
-      const { session, refreshed } = await refreshTokenIfNeeded(sessionData);
-      if (refreshed) await setSession(session);
+    try {
+      if (sessionData.drive_folder_id === "demo-local") {
+        demoStore.set("_meta.json", metadata);
+      } else {
+        const { session, refreshed } = await refreshTokenIfNeeded(sessionData);
+        if (refreshed) await setSession(session);
 
-      const auth = getAuthenticatedClient(session);
+        const auth = getAuthenticatedClient(session);
 
-      if (!session.drive_folder_id) {
-        const folderId = await createIncaseFolder(auth);
-        session.drive_folder_id = folderId;
-        await setSession(session);
+        if (!session.drive_folder_id) {
+          const folderId = await createIncaseFolder(auth);
+          session.drive_folder_id = folderId;
+          await setSession(session);
+        }
+
+        await writeFileRaw(
+          auth,
+          session.drive_folder_id!,
+          "_meta.json",
+          JSON.stringify(metadata, null, 2)
+        );
+        sessionData.drive_folder_id = session.drive_folder_id;
       }
-
-      await writeFileRaw(
-        auth,
-        session.drive_folder_id!,
-        "_meta.json",
-        JSON.stringify(metadata, null, 2)
-      );
+    } catch (err) {
+      if (isInsufficientScopeError(err)) {
+        return NextResponse.json(
+          {
+            error: "Google Drive permission needs to be refreshed",
+            code: "reauth_required",
+          },
+          { status: 403 }
+        );
+      }
+      throw err;
     }
 
     // Store DEK in session
@@ -137,6 +185,7 @@ export async function POST(request: NextRequest) {
 
   // --- UNLOCK: Verify PIN and unwrap DEK ---
   if (action === "unlock") {
+    const unlockPin = pin!;
     let meta: MetadataFile | null = null;
 
     if (sessionData.drive_folder_id === "demo-local") {
@@ -162,19 +211,19 @@ export async function POST(request: NextRequest) {
     }
 
     if (!meta?.pin_check || !meta?.salt) {
-      return NextResponse.json({ error: "No PIN set" }, { status: 400 });
+      return NextResponse.json({ error: "No access code set" }, { status: 400 });
     }
 
-    const valid = await verifyPin(pin, meta.salt, meta.pin_check);
+    const valid = await verifyPin(unlockPin, meta.salt, meta.pin_check);
     if (!valid) {
-      return NextResponse.json({ error: "Incorrect PIN", valid: false }, { status: 401 });
+      return NextResponse.json({ error: "Incorrect access code", valid: false }, { status: 401 });
     }
 
     // Unwrap DEK with PIN
     let dek: string;
     if (meta.wrapped_dek) {
       // v2: DEK layer
-      dek = await unwrapDEK(meta.wrapped_dek, pin, meta.salt);
+      dek = await unwrapDEK(meta.wrapped_dek, unlockPin, meta.salt);
     } else {
       // v1 legacy: migrate all data to DEK-based encryption
       const { encryptWithDEK, wrapDEKForRecovery } = await import("@/lib/crypto");
@@ -184,7 +233,7 @@ export async function POST(request: NextRequest) {
       async function v1Decrypt(encoded: string): Promise<ArrayBuffer> {
         const pinKey = await (async () => {
           const enc = new TextEncoder();
-          const km = await crypto.subtle.importKey("raw", enc.encode(pin), "PBKDF2", false, ["deriveKey"]);
+          const km = await crypto.subtle.importKey("raw", enc.encode(unlockPin), "PBKDF2", false, ["deriveKey"]);
           return crypto.subtle.deriveKey(
             { name: "PBKDF2", salt: enc.encode(meta!.salt), iterations: 100000, hash: "SHA-256" },
             km,
@@ -235,7 +284,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Update _meta.json to v2
-      const wrappedDEK = await wrapDEK(dek, pin, meta.salt);
+      const wrappedDEK = await wrapDEK(dek, unlockPin, meta.salt);
       const recoveryDEK = await wrapDEKForRecovery(dek, sessionData.email);
       meta.wrapped_dek = wrappedDEK;
       meta.recovery_dek = recoveryDEK;
@@ -258,8 +307,62 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, valid: true });
   }
 
+  // --- OWNER UNLOCK: Google-authenticated owner opens the kit via recovery-wrapped DEK ---
+  if (action === "owner_unlock") {
+    let meta: MetadataFile | null = null;
+    let currentSession = { ...sessionData };
+
+    if (currentSession.drive_folder_id === "demo-local") {
+      meta = demoStore.get("_meta.json") as MetadataFile | null;
+    } else {
+      const { session, refreshed } = await refreshTokenIfNeeded(currentSession);
+      if (refreshed) {
+        currentSession = session;
+        await setSession(currentSession);
+      }
+
+      const auth = getAuthenticatedClient(currentSession);
+
+      if (!currentSession.drive_folder_id) {
+        return NextResponse.json({ error: "No folder found" }, { status: 400 });
+      }
+
+      const metaRaw = await readFileRaw(auth, currentSession.drive_folder_id!, "_meta.json");
+      if (metaRaw) {
+        try {
+          meta = JSON.parse(metaRaw);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    if (!meta?.pin_check || !meta?.salt) {
+      return NextResponse.json({ error: "No emergency access code set" }, { status: 400 });
+    }
+
+    if (!meta.recovery_dek) {
+      return NextResponse.json(
+        {
+          error: "Enter your emergency access code once to upgrade this kit.",
+          code: "access_code_required",
+        },
+        { status: 409 }
+      );
+    }
+
+    const dek = await unwrapDEKForRecovery(meta.recovery_dek, currentSession.email);
+    currentSession.dek = dek;
+    currentSession.pin = undefined;
+    currentSession.salt = undefined;
+    await setSession(currentSession);
+
+    return NextResponse.json({ success: true });
+  }
+
   // --- RESET: Recover DEK via server key, re-wrap with new PIN ---
   if (action === "reset") {
+    const newPin = pin!;
     let meta: MetadataFile | null = null;
 
     // Use a single session reference that stays up-to-date across refreshes
@@ -319,8 +422,8 @@ export async function POST(request: NextRequest) {
 
     // Create new PIN wrapping
     const salt = generateSalt();
-    const pinCheck = await generatePinCheck(pin, salt);
-    const wrappedDEK = await wrapDEK(dek, pin, salt);
+    const pinCheck = await generatePinCheck(newPin, salt);
+    const wrappedDEK = await wrapDEK(dek, newPin, salt);
     const recoveryDEK = await wrapDEKForRecovery(dek, currentSession.email);
 
     const metadata: MetadataFile = {
